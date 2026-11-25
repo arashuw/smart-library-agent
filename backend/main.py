@@ -5,7 +5,7 @@ from pydantic import BaseModel
 from typing import Optional
 
 from .database import engine, get_db, Base
-from .models import UserBook, BookInsight
+from .models import UserBook, BookInsight, UserProfile
 from .agent import get_book_recommendations, chat_with_librarian
 from .book_fetcher import fetch_book_cover
 
@@ -20,6 +20,11 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+class ProfileUpdate(BaseModel):
+    name: str
+    favorite_genres: Optional[str] = ""
+    reading_goal: Optional[str] = ""
 
 class BookCreate(BaseModel):
     title: str
@@ -39,9 +44,55 @@ class ChatRequest(BaseModel):
     message: str
     recent_recommendations: Optional[str] = ""
 
+def _get_profile_dict(db: Session) -> dict | None:
+    profile = db.query(UserProfile).first()
+    if not profile:
+        return None
+    return {
+        "id": profile.id,
+        "name": profile.name,
+        "favorite_genres": profile.favorite_genres or "",
+        "reading_goal": profile.reading_goal or "",
+    }
+
 @app.get("/")
 def read_root():
     return {"message": "Smart Library Agent Backend is Running!"}
+
+@app.get("/profile/")
+def get_profile(db: Session = Depends(get_db)):
+    profile = db.query(UserProfile).first()
+    if not profile:
+        return {"exists": False}
+    return {
+        "exists": True,
+        "name": profile.name,
+        "favorite_genres": profile.favorite_genres or "",
+        "reading_goal": profile.reading_goal or "",
+    }
+
+@app.post("/profile/")
+def save_profile(data: ProfileUpdate, db: Session = Depends(get_db)):
+    profile = db.query(UserProfile).first()
+    if profile:
+        profile.name = data.name.strip()
+        profile.favorite_genres = (data.favorite_genres or "").strip()
+        profile.reading_goal = (data.reading_goal or "").strip()
+    else:
+        profile = UserProfile(
+            name=data.name.strip(),
+            favorite_genres=(data.favorite_genres or "").strip(),
+            reading_goal=(data.reading_goal or "").strip(),
+        )
+        db.add(profile)
+    db.commit()
+    db.refresh(profile)
+    return {
+        "exists": True,
+        "name": profile.name,
+        "favorite_genres": profile.favorite_genres or "",
+        "reading_goal": profile.reading_goal or "",
+    }
 
 @app.post("/books/")
 def add_book(book: BookCreate, db: Session = Depends(get_db)):
@@ -95,13 +146,14 @@ def recommend_books(req: RecommendRequest, db: Session = Depends(get_db)):
         }
         for b in books
     ]
-    
-    ai_result = get_book_recommendations(user_books_data, req.custom_mood)
-    
+    profile_data = _get_profile_dict(db)
+
+    ai_result = get_book_recommendations(user_books_data, req.custom_mood, profile_data)
+
     for rec in ai_result.get("recommendations", []):
         cover = fetch_book_cover(rec.get("english_title", rec["title"]), rec["author"])
         rec["cover_url"] = cover
-        
+
         existing = db.query(BookInsight).filter(BookInsight.title == rec["title"]).first()
         if not existing:
             insight = BookInsight(
@@ -113,7 +165,7 @@ def recommend_books(req: RecommendRequest, db: Session = Depends(get_db)):
                 cover_url=cover
             )
             db.add(insight)
-    
+
     db.commit()
     return ai_result
 
@@ -130,5 +182,6 @@ def chat_endpoint(req: ChatRequest, db: Session = Depends(get_db)):
         }
         for b in books
     ]
-    reply = chat_with_librarian(user_books_data, req.message, req.recent_recommendations)
+    profile_data = _get_profile_dict(db)
+    reply = chat_with_librarian(user_books_data, req.message, req.recent_recommendations, profile_data)
     return {"reply": reply}

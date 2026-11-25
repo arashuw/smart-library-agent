@@ -2,6 +2,15 @@ from sqlalchemy import Column, Integer, String, Float, Text, DateTime
 from datetime import datetime, timezone
 from .database import Base
 
+class UserProfile(Base):
+    __tablename__ = "user_profiles"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(100), nullable=False)
+    favorite_genres = Column(String(300), nullable=True)
+    reading_goal = Column(String(300), nullable=True)
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+
 class UserBook(Base):
     __tablename__ = "user_books"
 

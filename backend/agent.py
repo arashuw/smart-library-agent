@@ -26,7 +26,7 @@ class RecommendedBook(BaseModel):
     target_audience: str = Field(description="این کتاب مناسب چه کسانی است")
 
 class RecommendationResponse(BaseModel):
-    taste_analysis: str = Field(description="تحلیل کوتاه ۲ جمله‌ای از سلیقه مطالعاتی فعلی کاربر")
+    taste_analysis: str = Field(description="تحلیل کوتاه ۲ جمله‌ای از سلیقه مطالعاتی فعلی کاربر با خطاب قرار دادن نام او")
     recommendations: list[RecommendedBook] = Field(description="لیست ۳ کتاب پیشنهادی هوشمند")
 
 def _format_user_books(user_books: list[dict]) -> str:
@@ -40,18 +40,33 @@ def _format_user_books(user_books: list[dict]) -> str:
         lines.append(f"- [{status_label}] «{b['title']}» اثر {b['author']} ({rating_str}) {review_str}")
     return "\n".join(lines)
 
-def get_book_recommendations(user_books: list[dict], custom_mood: str = "") -> dict:
-    """تحلیل کتاب‌های کاربر و تولید پیشنهادهای هوشمند"""
+def _format_profile(profile: dict | None) -> str:
+    if not profile or not profile.get("name"):
+        return "نام کاربر: مهمان (هنوز پروفایل تکمیل نشده است)"
+    parts = [f"نام کاربر: {profile['name']}"]
+    if profile.get("favorite_genres"):
+        parts.append(f"ژانرها و موضوعات مورد علاقه: {profile['favorite_genres']}")
+    if profile.get("reading_goal"):
+        parts.append(f"هدف یا سلیقه مطالعاتی: {profile['reading_goal']}")
+    return "\n".join(parts)
+
+def get_book_recommendations(user_books: list[dict], custom_mood: str = "", profile: dict | None = None) -> dict:
+    """تحلیل پروفایل و کتاب‌های کاربر و تولید پیشنهادهای هوشمند"""
+    profile_text = _format_profile(profile)
     history_text = _format_user_books(user_books)
     mood_instruction = f"\nدرخواست یا حال‌وهوای فعلی کاربر: {custom_mood}" if custom_mood else ""
 
     prompt = f"""
-    تو یک مشاور هوشمند و خبره کتابخانه هستی. بر اساس لیست کتاب‌هایی که کاربر قبلاً خوانده، امتیازهایی که داده و نظراتش، سلیقه دقیق او را تحلیل کن و ۳ کتاب جدید (که در لیست قبلی او نیستند) پیشنهاد بده.
-    
+    تو یک مشاور هوشمند و خبره کتابخانه هستی. با توجه به مشخصات کاربر و لیست کتاب‌هایی که قبلاً خوانده، سلیقه دقیق او را تحلیل کن و ۳ کتاب جدید (که در لیست قبلی او نیستند) پیشنهاد بده.
+    در تحلیل و دلایل پیشنهاد، مستقیماً نام کاربر را (در صورت وجود) با لحنی صمیمی و محترمانه خطاب قرار بده.
+
+    مشخصات کاربر:
+    {profile_text}
+
     سابقه مطالعاتی کاربر:
     {history_text}
     {mood_instruction}
-    
+
     پاسخ را کاملاً به زبان فارسی روان، جذاب و حرفه‌ای بنویس.
     """
 
@@ -74,14 +89,18 @@ def get_book_recommendations(user_books: list[dict], custom_mood: str = "") -> d
 
     raise last_error
 
-def chat_with_librarian(user_books: list[dict], user_message: str, recent_recommendations: str = "") -> str:
-    """گفتگوی تعاملی با ایجنت کتابخانه"""
+def chat_with_librarian(user_books: list[dict], user_message: str, recent_recommendations: str = "", profile: dict | None = None) -> str:
+    """گفتگوی تعاملی با ایجنت کتابخانه با شناخت نام و پروفایل کاربر"""
+    profile_text = _format_profile(profile)
     history_text = _format_user_books(user_books)
     rec_context = f"\nکتاب‌هایی که همین الان به کاربر پیشنهاد شده‌اند:\n{recent_recommendations}" if recent_recommendations else ""
 
     prompt = f"""
     تو یک مشاور کتابخانه باهوش، خوش‌برخورد و دقیق هستی. کاربر درباره کتاب‌ها یا پیشنهادهای اخیر سؤالی پرسیده است.
-    با توجه به سابقه مطالعاتی او و پیشنهادهای فعلی، پاسخی کوتاه، دقیق، کاربردی و بدون اسپویل به زبان فارسی بده.
+    با توجه به نام و مشخصات کاربر، سابقه مطالعاتی او و پیشنهادهای فعلی، پاسخی کوتاه، دقیق، کاربردی و بدون اسپویل به زبان فارسی بده.
+
+    مشخصات کاربر:
+    {profile_text}
 
     سابقه کتابخانه کاربر:
     {history_text}
